@@ -1,0 +1,24 @@
+[package]
+name = "riesgos-chile"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/DanielD-S/rustgis-riesgos-chile"
+rust-version = "1.90"
+publish = false
+
+# A plugin is a WebAssembly module: build and package it with
+#   python scripts/package.py
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+rustgis-plugin = { git = "https://github.com/opengeos/rustgis-plugins" }
+
+# Small, fast plugin modules. A panic aborts: RustGIS reports it as the plugin failing.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
