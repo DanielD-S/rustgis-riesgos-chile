@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-11-05)
 
 - First version: 18 layers in the **Riesgos Chile** tab.
   - **Earthquakes** (USGS): M2.5+ of the last 24 hours, 7 days and 30 days, M4.5+ of the last 12
