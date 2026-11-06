@@ -1,7 +1,7 @@
 {
   "id": "riesgos-chile",
   "name": "Riesgos Chile",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Chile's natural hazards as one-click layers: recent earthquakes (USGS), wildfire hotspots of the last days (NASA FIRMS, VIIRS), and SENAPRED's tsunami, volcanic and wildfire hazard maps: areas to evacuate, evacuation routes, meeting points, the 30 m contour, volcanic hazard areas and fire recurrence. For information and planning; in an emergency, follow SENAPRED's instructions.",
   "author": "Daniel Díaz",
   "homepage": "https://github.com/DanielD-S/rustgis-riesgos-chile",

@@ -1,7 +1,7 @@
 //! Riesgos Chile: Chile's natural hazards as one-click layers.
 //!
-//! Each layer in [`CATALOG`] is a command that adds features with RustGIS's `layer.addUrl` (which
-//! needs the `network` permission), then styles them:
+//! Each layer in [`CATALOG`] is a command that reads its features as GeoJSON with `host.fetch`
+//! (which needs the `network` permission), adds them and styles them (see `fetch.rs`):
 //!
 //! - Earthquakes: the USGS's catalogue (FDSN event service), of a period and a magnitude.
 //! - Hotspots: NASA FIRMS's VIIRS detections, through Esri's Living Atlas layer, which can be
@@ -14,7 +14,10 @@
 
 use rustgis_plugin::{Request, Value, host, json};
 
+mod fetch;
 mod outline;
+
+use fetch::Fetched;
 
 /// `plugin.json`, for its translations.
 pub(crate) const MANIFEST: &str = include_str!("../plugin.json");
@@ -52,7 +55,7 @@ pub struct Entry {
 #[derive(Clone, Copy, Debug)]
 pub enum Source {
     /// An ArcGIS feature layer: read whole ([`WHOLE`]), or in the map view from the map scale
-    /// `scale` (its denominator) in, where the most its server gives to    /// one request is `max`.
+    /// `scale` (its denominator) in, where the most its server gives to one request is `max`.
     Arcgis { layer: &'static str, scale: f64, max: u32 },
     /// The USGS's earthquakes of the last `days`, of magnitude `min_mag` or more.
     Quakes { days: u32, min_mag: f64 },
@@ -316,31 +319,54 @@ fn add(req: &Request, e: &Entry) -> Result<Value, String> {
     } else {
         None
     };
-    let out = match host::run("layer.addUrl", json!({"url": url(e, view), "name": e.name, "zoom": view.is_none()})) {
+    let address = url(e, view);
+    let read = match fetch::fetch_and_add(&address, e.name)? {
+        Some(Fetched::Pending) => {
+            host::notify(&req.tr(MANIFEST, "Downloading {name}; it is added when it lands.", name));
+            return Ok(json!({"pending": true}));
+        }
+        // `host.addLayer` doesn't count the features: the layer list does.
+        Some(Fetched::Added(out)) => Ok(match (out.get("layer").cloned(), host::layers()) {
+            (Some(layer), Ok(layers)) => {
+                let n = layers.as_array().and_then(|ls| ls.iter().find(|l| l["id"] == layer)).and_then(|l| l["features"].as_u64());
+                json!({"layer": layer, "features": n})
+            }
+            _ => out,
+        }),
+        None => host::run("layer.addUrl", json!({"url": address, "name": e.name, "zoom": view.is_none()})),
+    };
+    let out = match read {
         Ok(out) => out,
         // The web app downloads only from its own Add Data dialog.
         Err(err) if err.contains("web app") => {
             return Err(req.tr(
                 MANIFEST,
                 "In the web app, add {name} with Home › Add Data › From URL and this address: {url}",
-                &[("name", e.name), ("url", &url(e, view))],
+                &[("name", e.name), ("url", &address)],
             ));
         }
         Err(err) => return Err(err),
     };
+    // `layer.addUrl` in the desktop app: the layer lands after the command, in RustGIS's style.
     if out.get("pending").and_then(Value::as_bool) == Some(true) {
         host::notify(&req.tr(MANIFEST, "Downloading {name}; it is added when it lands.", name));
         return Ok(out);
     }
-    // An answer with no features comes as a table: nothing happened in the period.
-    if let Some(table) = out.get("table").cloned() {
-        let _ = host::run("layer.remove", json!({"layer": table}));
+    // No features: nothing happened in the period. `layer.addUrl` adds them as a table,
+    // `host.addLayer` as an empty layer.
+    let empty = out.get("table").or_else(|| out.get("layer").filter(|_| out.get("features").and_then(Value::as_u64) == Some(0)));
+    if let Some(added) = empty.cloned() {
+        let _ = host::run("layer.remove", json!({"layer": added}));
         host::notify(&req.tr(MANIFEST, "{name}: nothing to show right now.", name));
         return Ok(json!({"features": 0}));
     }
     if let Some(layer) = out.get("layer").cloned() {
         // A style that doesn't take (an older RustGIS) leaves RustGIS's own.
         let _ = style(&layer, e.style);
+        // `host.addLayer` doesn't zoom to what it adds.
+        if view.is_none() {
+            let _ = host::run("layer.zoomTo", json!({"layer": layer}));
+        }
     }
     let n = out.get("features").and_then(Value::as_u64).unwrap_or(0);
     let limit = match e.source {
